@@ -26,21 +26,13 @@ class OffboardController(Node):
         self.current_waypoint = WaypointList()
         self.reached_waypoint = WaypointReached()
         self.current_pose = PoseStamped()
-
-        # Wait for GPS coordinates to be available
-        self.current_latitude = 0.0
-        self.current_longitude = 0.0
-        self.current_altitude = 0.0
-        while self.current_latitude == 0.0 and self.current_longitude == 0.0:
-            self.get_logger().info('Waiting for GPS coordinates...')
-            rclpy.spin_once(self)
+        self.global_coord = NavSatFix()
 
     def state_callback(self, msg):
         self.current_state = msg
 
     def gps_callback(self, msg):
-        self.current_latitude = msg.latitude
-        self.current_longitude = msg.longitude
+        self.global_coord = msg
 
     def altitude_callback(self, msg):
         self.current_altitude = msg.relative
@@ -66,9 +58,9 @@ class OffboardController(Node):
         future = arming_client.call_async(request)
         rclpy.spin_until_future_complete(self, future)
 
-        if future.result() is not None and future.result().success:
+        if future.result() is not None and future.result().success and self.current_state.armed == arm:
             self.get_logger().info('Vehicle armed: {}'.format(arm))
-            return self.current_state.armed == arm
+            return True
         else:
             self.get_logger().warn('Failed to arm vehicle')
             return False
@@ -85,9 +77,9 @@ class OffboardController(Node):
         future = set_mode_client.call_async(request)
         rclpy.spin_until_future_complete(self, future)
 
-        if future.result() is not None and future.result().mode_sent:
+        if future.result() is not None and future.result().mode_sent and self.current_state.mode == mode:
             self.get_logger().info('Mode set to: {}'.format(mode))
-            return self.current_state.mode == mode
+            return True
         else:
             self.get_logger().warn('Failed to set mode: {}'.format(mode))
             return False
@@ -135,10 +127,10 @@ class OffboardController(Node):
         waypoint.command = command
         waypoint.is_current = is_current
         waypoint.autocontinue = True
-        waypoint.param1 = p1
-        waypoint.param2 = p2
-        waypoint.param3 = p3
-        waypoint.param4 = p4
+        waypoint.param1 = float(p1)
+        waypoint.param2 = float(p2)
+        waypoint.param3 = float(p3)
+        waypoint.param4 = float(p4)
         waypoint.x_lat = x
         waypoint.y_long = y
         waypoint.z_alt = z
@@ -183,12 +175,12 @@ class OffboardController(Node):
         target_pose.pose.position.y = y
         target_pose.pose.position.z = z
 
-        rate = self.create_rate(20)
-        while rclpy.ok() and not self.target_reached(self.current_pose.pose, target_pose.pose, 0.5):
+        # rate = self.create_rate(20)
+        while rclpy.ok() and not self.target_reached(self.current_pose, target_pose, 0.25):
             self.pose_pub.publish(target_pose)
             if self.current_state.mode != 'OFFBOARD':
                 self.set_mode('OFFBOARD')
-            rate.sleep()
+            # rate.sleep()
 
     def magical_shape(self):
         start_x = self.current_pose.pose.position.x
